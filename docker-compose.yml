@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  gemini-mcp:
+    build: ./gemini-mcp
+    ports:
+      - "3000:3000"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - PORT=3000
+      - HOST=0.0.0.0
+    restart: always
+
+  ai-detector-mcp:
+    build: ./ai-detector-mcp
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - HOST=0.0.0.0
+      - TRANSFORMERS_CACHE=/app/.cache
+    volumes:
+      - ./ai-detector-mcp/cache:/app/.cache
+    restart: always
+
+  google-docs-mcp:
+    build: ./google-docs-mcp
+    ports:
+      - "3002:3002"
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json
+      - PORT=3002
+      - HOST=0.0.0.0
+    volumes:
+      - ./google-docs-mcp/credentials.json:/app/credentials.json
+    restart: always
+
+  orchestrator:
+    build: ./workflow-orchestrator
+    depends_on:
+      - gemini-mcp
+      - ai-detector-mcp
+      - google-docs-mcp
+    environment:
+      - GEMINI_MCP_URL=http://gemini-mcp:3000/sse
+      - DETECTOR_MCP_URL=http://ai-detector-mcp:3001/sse
+      - GOOGLE_DOCS_MCP_URL=http://google-docs-mcp:3002/sse

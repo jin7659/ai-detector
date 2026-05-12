@@ -1,0 +1,1 @@
+{"name": "ai-detector-mcp", "version": "1.0.0", "dependencies": {"@modelcontextprotocol/sdk": "latest", "express": "latest", "@xenova/transformers": "latest"}}

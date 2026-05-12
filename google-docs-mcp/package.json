@@ -1,0 +1,1 @@
+{"name": "google-docs-mcp", "version": "1.0.0", "dependencies": {"@modelcontextprotocol/sdk": "latest", "express": "latest", "googleapis": "latest"}}
