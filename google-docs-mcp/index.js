@@ -7,37 +7,41 @@ const {
 } = require("@modelcontextprotocol/sdk/types.js");
 const { google } = require("googleapis");
 
-// Google Auth 설정 (기존 로직 유지)
 const auth = new google.auth.GoogleAuth({
   scopes: ["https://www.googleapis.com/auth/documents"],
 });
 const docs = google.docs({ version: "v1", auth });
 
 const app = express();
+app.use(express.json());
+
+const transports = new Map();
 
 app.get("/sse", async (req, res) => {
   console.log("새로운 SSE 연결 시도...");
   
+  const transport = new SSEServerTransport("/messages", res);
+  const sessionId = transport.sessionId;
+  transports.set(sessionId, transport);
+
   const connectionServer = new Server(
     { name: "google-docs", version: "1.0.0" },
     { capabilities: { tools: {} } }
   );
 
   connectionServer.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [
-      {
-        name: "save_to_google_docs",
-        description: "작성된 글을 Google Docs 문서로 저장합니다.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            title: { type: "string", description: "문서 제목" },
-            content: { type: "string", description: "문서 내용" }
-          },
-          required: ["title", "content"]
-        }
+    tools: [{
+      name: "save_to_google_docs",
+      description: "작성된 글을 Google Docs 문서로 저장합니다.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          content: { type: "string" }
+        },
+        required: ["title", "content"]
       }
-    ]
+    }]
   }));
 
   connectionServer.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -60,18 +64,24 @@ app.get("/sse", async (req, res) => {
     throw new Error("Tool not found");
   });
 
-  const transport = new SSEServerTransport("/messages", res);
   await connectionServer.connect(transport);
-  console.log("SSE 연결 성공");
+  console.log(`SSE 연결 성공 (Session: ${sessionId})`);
 
   req.on('close', () => {
-    console.log("SSE 연결 종료");
+    console.log(`SSE 연결 종료 (Session: ${sessionId})`);
+    transports.delete(sessionId);
     connectionServer.close();
   });
 });
 
 app.post("/messages", async (req, res) => {
-  res.status(200).end();
+  const sessionId = req.query.sessionId;
+  const transport = transports.get(sessionId);
+  if (transport) {
+    await transport.handlePostMessage(req, res);
+  } else {
+    res.status(404).send("Session not found");
+  }
 });
 
 const PORT = 3002;

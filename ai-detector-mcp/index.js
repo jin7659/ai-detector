@@ -9,23 +9,20 @@ const {
 let pipeline;
 let classifier;
 
-// Transformers.js 초기화
 async function initModel() {
-  console.log("로컬 AI 모델(RoBERTa) 로드 중...");
+  console.log("로컬 AI 모델 로드 중...");
   try {
     const { pipeline: hfPipeline, env } = await import("@huggingface/transformers");
     env.remoteHost = "https://hf-mirror.com";
     env.allowRemoteModels = false;
     env.localModelPath = "/app/.cache";
-    
     pipeline = hfPipeline;
     classifier = await pipeline("text-classification", "onnx-community/roberta-base-openai-detector-ONNX");
-    console.log("모델 로드 완료! (오프라인 모드)");
+    console.log("모델 로드 완료!");
   } catch (error) {
-    console.error("모델 로딩 중 에러 발생:", error);
+    console.error("모델 로딩 에러:", error);
   }
 }
-
 initModel();
 
 function chunkText(text, maxLength = 1500) {
@@ -37,9 +34,17 @@ function chunkText(text, maxLength = 1500) {
 }
 
 const app = express();
+app.use(express.json()); // POST 바디 파싱 필수
+
+// 세션별 트랜스포트 보관함
+const transports = new Map();
 
 app.get("/sse", async (req, res) => {
   console.log("새로운 SSE 연결 시도...");
+  
+  const transport = new SSEServerTransport("/messages", res);
+  const sessionId = transport.sessionId; // SDK가 생성한 세션 ID
+  transports.set(sessionId, transport);
   
   const connectionServer = new Server(
     { name: "ai-detector", version: "1.0.0" },
@@ -47,26 +52,21 @@ app.get("/sse", async (req, res) => {
   );
 
   connectionServer.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [
-      {
-        name: "check_ai_probability",
-        description: "텍스트가 AI에 의해 작성되었을 확률을 분석합니다.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            text: { type: "string", description: "분석할 본문 텍스트" }
-          },
-          required: ["text"]
-        }
+    tools: [{
+      name: "check_ai_probability",
+      description: "텍스트가 AI에 의해 작성되었을 확률을 분석합니다.",
+      inputSchema: {
+        type: "object",
+        properties: { text: { type: "string" } },
+        required: ["text"]
       }
-    ]
+    }]
   }));
 
   connectionServer.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (request.params.name === "check_ai_probability") {
       const text = request.params.arguments.text;
       if (!classifier) return { content: [{ type: "text", text: "모델 준비 중..." }], isError: true };
-      
       const chunks = chunkText(text);
       let totalScore = 0;
       for (const chunk of chunks) {
@@ -82,20 +82,24 @@ app.get("/sse", async (req, res) => {
     throw new Error("Tool not found");
   });
 
-  const transport = new SSEServerTransport("/messages", res);
   await connectionServer.connect(transport);
-  console.log("SSE 연결 성공");
+  console.log(`SSE 연결 성공 (Session: ${sessionId})`);
 
   req.on('close', () => {
-    console.log("SSE 연결 종료");
+    console.log(`SSE 연결 종료 (Session: ${sessionId})`);
+    transports.delete(sessionId);
     connectionServer.close();
   });
 });
 
 app.post("/messages", async (req, res) => {
-  // SSEServerTransport가 내부적으로 POST 요청을 처리할 수 있도록 구현되어야 함
-  // 여기서는 간단히 에러 방지만 함
-  res.status(200).end();
+  const sessionId = req.query.sessionId;
+  const transport = transports.get(sessionId);
+  if (transport) {
+    await transport.handlePostMessage(req, res);
+  } else {
+    res.status(404).send("Session not found");
+  }
 });
 
 const PORT = 3001;

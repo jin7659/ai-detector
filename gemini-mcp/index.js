@@ -7,30 +7,35 @@ const {
 } = require("@modelcontextprotocol/sdk/types.js");
 
 const app = express();
+app.use(express.json());
+
+const transports = new Map();
 
 app.get("/sse", async (req, res) => {
   console.log("새로운 SSE 연결 시도...");
   
+  const transport = new SSEServerTransport("/messages", res);
+  const sessionId = transport.sessionId;
+  transports.set(sessionId, transport);
+
   const connectionServer = new Server(
     { name: "gemini-mcp", version: "1.0.0" },
     { capabilities: { tools: {} } }
   );
 
   connectionServer.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [
-      {
-        name: "write_gemini_article",
-        description: "Gemini를 사용하여 고품질 글을 작성합니다.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            topic: { type: "string", description: "글의 주제" },
-            style: { type: "string", description: "글의 스타일" }
-          },
-          required: ["topic", "style"]
-        }
+    tools: [{
+      name: "write_gemini_article",
+      description: "Gemini를 사용하여 고품질 글을 작성합니다.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          topic: { type: "string" },
+          style: { type: "string" }
+        },
+        required: ["topic", "style"]
       }
-    ]
+    }]
   }));
 
   connectionServer.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -41,18 +46,24 @@ app.get("/sse", async (req, res) => {
     throw new Error("Tool not found");
   });
 
-  const transport = new SSEServerTransport("/messages", res);
   await connectionServer.connect(transport);
-  console.log("SSE 연결 성공");
+  console.log(`SSE 연결 성공 (Session: ${sessionId})`);
 
   req.on('close', () => {
-    console.log("SSE 연결 종료");
+    console.log(`SSE 연결 종료 (Session: ${sessionId})`);
+    transports.delete(sessionId);
     connectionServer.close();
   });
 });
 
 app.post("/messages", async (req, res) => {
-  res.status(200).end();
+  const sessionId = req.query.sessionId;
+  const transport = transports.get(sessionId);
+  if (transport) {
+    await transport.handlePostMessage(req, res);
+  } else {
+    res.status(404).send("Session not found");
+  }
 });
 
 const PORT = 3000;
