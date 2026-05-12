@@ -1,14 +1,16 @@
 const { Server } = require("@modelcontextprotocol/sdk/server/index.js");
 const { SSEServerTransport } = require("@modelcontextprotocol/sdk/server/sse.js");
-const express = require("express");
 const { 
   ListToolsRequestSchema, 
-  CallToolRequestSchema 
+  CallToolRequestSchema,
+  ErrorCode,
+  McpError
 } = require("@modelcontextprotocol/sdk/types.js");
+const express = require("express");
 
+// --- AI 모델 초기화 로직 (기존 유지) ---
 let pipeline;
 let classifier;
-
 async function initModel() {
   console.log("로컬 AI 모델 로드 중...");
   try {
@@ -18,7 +20,7 @@ async function initModel() {
     env.localModelPath = "/app/.cache";
     pipeline = hfPipeline;
     classifier = await pipeline("text-classification", "onnx-community/roberta-base-openai-detector-ONNX");
-    console.log("모델 로드 완료!");
+    console.log("모델 로드 완료! (표준 모드 가동)");
   } catch (error) {
     console.error("모델 로딩 에러:", error);
   }
@@ -33,40 +35,66 @@ function chunkText(text, maxLength = 1500) {
   return chunks;
 }
 
+// --- Express 서버 설정 ---
 const app = express();
-// app.use(express.json()); // 제거: MCP SDK와 충돌 방지
-
-// 세션별 트랜스포트 보관함
 const transports = new Map();
 
 app.get("/sse", async (req, res) => {
-  console.log("새로운 SSE 연결 시도...");
-  
-  const transport = new SSEServerTransport("/messages", res);
-  const sessionId = transport.sessionId; // SDK가 생성한 세션 ID
-  transports.set(sessionId, transport);
-  
-  const connectionServer = new Server(
-    { name: "ai-detector", version: "1.0.0" },
-    { capabilities: { tools: {} } }
+  console.log("새로운 표준 SSE 연결 요청 수신");
+
+  // 1. 서버 인스턴스 생성 (명확한 도구 명세 포함)
+  const server = new Server(
+    {
+      name: "ai-detector-mcp",
+      version: "1.2.0",
+    },
+    {
+      capabilities: {
+        tools: {},
+      },
+    }
   );
 
-  connectionServer.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [{
-      name: "check_ai_probability",
-      description: "텍스트가 AI에 의해 작성되었을 확률을 분석합니다.",
-      inputSchema: {
-        type: "object",
-        properties: { text: { type: "string" } },
-        required: ["text"]
+  // 2. 도구 목록 정의 (가장 표준적인 JSON Schema 적용)
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: [
+      {
+        name: "check_ai_probability",
+        description: "텍스트가 AI에 의해 작성되었을 확률을 0%에서 100% 사이의 수치로 분석합니다.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            text: {
+              type: "string",
+              description: "AI 작성 여부를 분석할 본문 텍스트"
+            }
+          },
+          required: ["text"]
+        }
       }
-    }]
+    ]
   }));
 
-  connectionServer.setRequestHandler(CallToolRequestSchema, async (request) => {
-    if (request.params.name === "check_ai_probability") {
-      const text = request.params.arguments.text;
-      if (!classifier) return { content: [{ type: "text", text: "모델 준비 중..." }], isError: true };
+  // 3. 도구 실행 핸들러
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    if (request.params.name !== "check_ai_probability") {
+      throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${request.params.name}`);
+    }
+
+    const { text } = request.params.arguments;
+    if (!text) {
+      throw new McpError(ErrorCode.InvalidParams, "텍스트 내용이 누락되었습니다.");
+    }
+
+    if (!classifier) {
+      return {
+        content: [{ type: "text", text: "서버에서 AI 모델을 아직 로드 중입니다. 잠시 후 다시 시도해 주세요." }],
+        isError: true
+      };
+    }
+
+    try {
+      console.log(`분석 시작: ${text.substring(0, 50)}...`);
       const chunks = chunkText(text);
       let totalScore = 0;
       for (const chunk of chunks) {
@@ -77,18 +105,34 @@ app.get("/sse", async (req, res) => {
         }
       }
       const finalScore = (totalScore / chunks.length * 100).toFixed(2);
-      return { content: [{ type: "text", text: `분석 결과: AI 확률 ${finalScore}%` }] };
+      
+      return {
+        content: [{
+          type: "text",
+          text: `분석 결과, 이 텍스트가 AI에 의해 작성되었을 확률은 약 ${finalScore}% 입니다.`
+        }]
+      };
+    } catch (error) {
+      console.error("분석 중 에러:", error);
+      return {
+        content: [{ type: "text", text: `분석 중 기술적 에러가 발생했습니다: ${error.message}` }],
+        isError: true
+      };
     }
-    throw new Error("Tool not found");
   });
 
-  await connectionServer.connect(transport);
-  console.log(`SSE 연결 성공 (Session: ${sessionId})`);
+  // 4. 트랜스포트 연결 및 세션 관리
+  const transport = new SSEServerTransport("/messages", res);
+  const sessionId = transport.sessionId;
+  transports.set(sessionId, transport);
+  
+  await server.connect(transport);
+  console.log(`표준 연결 성공 (ID: ${sessionId})`);
 
   req.on('close', () => {
-    console.log(`SSE 연결 종료 (Session: ${sessionId})`);
+    console.log(`연결 종료 (ID: ${sessionId})`);
     transports.delete(sessionId);
-    connectionServer.close();
+    server.close();
   });
 });
 
@@ -104,5 +148,5 @@ app.post("/messages", async (req, res) => {
 
 const PORT = 3001;
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`AI Detector MCP server running at http://0.0.0.0:${PORT}/sse`);
+  console.log(`AI Detector MCP server listening at http://0.0.0.0:${PORT}/sse`);
 });
