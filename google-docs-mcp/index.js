@@ -4,6 +4,11 @@ const { google } = require("googleapis");
 const express = require("express");
 const path = require("path");
 
+const { 
+  ListToolsRequestSchema, 
+  CallToolRequestSchema 
+} = require("@modelcontextprotocol/sdk/types.js");
+
 const server = new Server(
   {
     name: "google-docs-mcp",
@@ -25,7 +30,7 @@ const auth = new google.auth.GoogleAuth({
 const docs = google.docs({ version: "v1", auth });
 
 // 도구 정의: 구글 독스 저장
-server.setRequestHandler("listTools", async () => {
+server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
@@ -45,7 +50,7 @@ server.setRequestHandler("listTools", async () => {
 });
 
 // 도구 실행 로직
-server.setRequestHandler("callTool", async (request) => {
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (request.params.name === "save_to_google_docs") {
     const { title, content } = request.params.arguments;
     

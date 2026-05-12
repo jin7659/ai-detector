@@ -2,6 +2,11 @@ const { Server } = require("@modelcontextprotocol/sdk/server/index.js");
 const { SSEServerTransport } = require("@modelcontextprotocol/sdk/server/sse.js");
 const express = require("express");
 
+const { 
+  ListToolsRequestSchema, 
+  CallToolRequestSchema 
+} = require("@modelcontextprotocol/sdk/types.js");
+
 const server = new Server(
   {
     name: "gemini-mcp",
@@ -15,7 +20,7 @@ const server = new Server(
 );
 
 // 도구 정의 예시: 글쓰기
-server.setRequestHandler("listTools", async () => {
+server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
@@ -35,7 +40,7 @@ server.setRequestHandler("listTools", async () => {
 });
 
 // 도구 실행 로직
-server.setRequestHandler("callTool", async (request) => {
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (request.params.name === "write_article") {
     // 여기서 실제 Gemini API 호출 로직이 들어갑니다.
     const { reference, guidelines } = request.params.arguments;

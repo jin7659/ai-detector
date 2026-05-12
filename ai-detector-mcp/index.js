@@ -34,6 +34,11 @@ function chunkText(text, maxLength = 1500) {
   return chunks;
 }
 
+const { 
+  ListToolsRequestSchema, 
+  CallToolRequestSchema 
+} = require("@modelcontextprotocol/sdk/types.js");
+
 const server = new Server(
   {
     name: "ai-detector-mcp",
@@ -47,7 +52,7 @@ const server = new Server(
 );
 
 // 도구 정의
-server.setRequestHandler("listTools", async () => {
+server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
@@ -66,7 +71,7 @@ server.setRequestHandler("listTools", async () => {
 });
 
 // 도구 실행 로직
-server.setRequestHandler("callTool", async (request) => {
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (request.params.name === "check_ai_probability") {
     const { text } = request.params.arguments;
     
