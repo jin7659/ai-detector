@@ -8,7 +8,7 @@ async function download() {
     env.localModelPath = "./.cache";
     env.allowRemoteModels = true; 
     
-    await pipeline("text-classification", "Xenova/roberta-base-openai-detector");
+    await pipeline("text-classification", "onnx-community/roberta-base-openai-detector-ONNX");
     console.log("모델 다운로드 완료!");
     process.exit(0);
   } catch (e) {

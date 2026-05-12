@@ -19,7 +19,7 @@ async function initModel() {
     
     pipeline = hfPipeline;
     // 빌드 시점에 받아온 모델을 로드합니다.
-    classifier = await pipeline("text-classification", "Xenova/roberta-base-openai-detector");
+    classifier = await pipeline("text-classification", "onnx-community/roberta-base-openai-detector-ONNX");
     console.log("모델 로드 완료! (오프라인 모드)");
   } catch (error) {
     console.error("모델 로딩 중 에러 발생:", error);
