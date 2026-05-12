@@ -28,12 +28,19 @@ sudo usermod -aG docker $USER
 newgrp docker
 ```
 
-## 3. 프로젝트 설치 및 실행
+## 3. 설치 및 실행 가이드
 
-### 저장소 클론
+### 1단계: GitHub에서 소스 코드 가져오기
+서버의 원하는 디렉토리에서 아래 명령어를 실행하여 프로젝트를 클론합니다.
 ```bash
 git clone https://github.com/jin7659/ai-detector.git mcp-system
 cd mcp-system
+```
+
+### 2단계: 최신 상태 유지 (업데이트 시)
+이미 설치된 상태에서 최신 기능이나 패치를 적용하려면 아래 명령어를 실행하세요.
+```bash
+git pull origin main
 ```
 
 ### 구글 독스 인증 설정 (credentials.json 발급 방법)
