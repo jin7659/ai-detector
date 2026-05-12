@@ -7,7 +7,7 @@ const {
 } = require("@modelcontextprotocol/sdk/types.js");
 
 const app = express();
-app.use(express.json());
+// app.use(express.json());
 
 const transports = new Map();
 

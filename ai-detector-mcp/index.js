@@ -34,7 +34,7 @@ function chunkText(text, maxLength = 1500) {
 }
 
 const app = express();
-app.use(express.json()); // POST 바디 파싱 필수
+// app.use(express.json()); // 제거: MCP SDK와 충돌 방지
 
 // 세션별 트랜스포트 보관함
 const transports = new Map();

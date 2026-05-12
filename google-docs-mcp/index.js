@@ -13,7 +13,7 @@ const auth = new google.auth.GoogleAuth({
 const docs = google.docs({ version: "v1", auth });
 
 const app = express();
-app.use(express.json());
+// app.use(express.json());
 
 const transports = new Map();
 
