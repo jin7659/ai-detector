@@ -12,7 +12,8 @@ async function initModel() {
   try {
     const { pipeline: hfPipeline, env } = await import("@xenova/transformers");
     
-    // 로컬 전용 모드 강제 활성화
+    // 로컬 전용 모드 강제 활성화 및 미러 설정
+    env.remoteHost = "https://hf-mirror.com"; // 허깅페이스 차단 우회용 미러
     env.allowRemoteModels = false; // 외부 접속 차단
     env.localModelPath = "/app/.cache"; // 로컬 경로 지정
     

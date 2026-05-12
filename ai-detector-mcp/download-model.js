@@ -3,7 +3,8 @@ import { pipeline, env } from "@xenova/transformers";
 async function download() {
   console.log("모델 선행 다운로드 시작...");
   try {
-    // 빌드 시점에 저장할 경로 고정
+    // 허깅페이스 차단을 우회하기 위해 미러 서버 설정
+    env.remoteHost = "https://hf-mirror.com"; 
     env.localModelPath = "./.cache";
     env.allowRemoteModels = true; 
     
