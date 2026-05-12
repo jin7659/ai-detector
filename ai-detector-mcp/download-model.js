@@ -1,4 +1,4 @@
-import { pipeline, env } from "@xenova/transformers";
+const { pipeline, env } = await import("@huggingface/transformers");
 
 async function download() {
   console.log("모델 선행 다운로드 시작...");

@@ -10,7 +10,7 @@ let classifier;
 async function initModel() {
   console.log("로컬 AI 모델(RoBERTa) 로드 중...");
   try {
-    const { pipeline: hfPipeline, env } = await import("@xenova/transformers");
+    const { pipeline: hfPipeline, env } = await import("@huggingface/transformers");
     
     // 로컬 전용 모드 강제 활성화 및 미러 설정
     env.remoteHost = "https://hf-mirror.com"; // 허깅페이스 차단 우회용 미러
@@ -18,7 +18,7 @@ async function initModel() {
     env.localModelPath = "/app/.cache"; // 로컬 경로 지정
     
     pipeline = hfPipeline;
-    // 빌드 시점에 받아온 모델을 로드합니다.
+    // 전공자님께서 요청하신 모델로 적용
     classifier = await pipeline("text-classification", "onnx-community/roberta-base-openai-detector-ONNX");
     console.log("모델 로드 완료! (오프라인 모드)");
   } catch (error) {
