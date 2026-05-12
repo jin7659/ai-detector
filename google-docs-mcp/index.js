@@ -9,7 +9,6 @@ const {
 const express = require("express");
 const { google } = require("googleapis");
 
-// --- Google API 초기화 ---
 const auth = new google.auth.GoogleAuth({
   scopes: [
     "https://www.googleapis.com/auth/documents",
@@ -20,17 +19,17 @@ const auth = new google.auth.GoogleAuth({
 const docs = google.docs({ version: "v1", auth });
 const drive = google.drive({ version: "v3", auth });
 
-// 전공자님의 공용 폴더 ID
-const SHARED_FOLDER_ID = "17X92aNaiBR1dDaf-6KAPoMDtSOvhFDrH";
+// 기본 폴더 (지정되지 않았을 때의 대비책)
+const DEFAULT_FOLDER_ID = "17X92aNaiBR1dDaf-6KAPoMDtSOvhFDrH";
 
 const app = express();
 const transports = new Map();
 
 app.get("/sse", async (req, res) => {
-  console.log("Google Docs MCP 다중 사용자 연결 요청");
+  console.log("Google Docs MCP 개인별 폴더 저장 지원 모드");
 
   const server = new Server(
-    { name: "google-docs-mcp", version: "1.3.0" },
+    { name: "google-docs-mcp", version: "1.4.0" },
     { capabilities: { tools: {} } }
   );
 
@@ -38,12 +37,16 @@ app.get("/sse", async (req, res) => {
     tools: [
       {
         name: "save_to_google_docs",
-        description: "공용 폴더에 새로운 문서를 생성하고 저장합니다.",
+        description: "지정된 폴더에 새로운 문서를 생성하고 저장합니다.",
         inputSchema: {
           type: "object",
           properties: {
             title: { type: "string", description: "문서 제목" },
-            content: { type: "string", description: "문서 본문 내용" }
+            content: { type: "string", description: "문서 본문 내용" },
+            folderId: { 
+              type: "string", 
+              description: "저장할 구글 드라이브 폴더의 ID (각 사용자의 개인 폴더 ID)" 
+            }
           },
           required: ["title", "content"]
         }
@@ -56,16 +59,16 @@ app.get("/sse", async (req, res) => {
       throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${request.params.name}`);
     }
 
-    const { title, content } = request.params.arguments;
+    const { title, content, folderId } = request.params.arguments;
+    const targetFolder = folderId || DEFAULT_FOLDER_ID;
 
     try {
-      console.log(`[공용폴더 저장] 문서 생성 시작: ${title}`);
+      console.log(`[맞춤형 저장] 문서 생성 시작: ${title} -> 폴더: ${targetFolder}`);
       
-      // 1. 드라이브 API를 사용하여 특정 폴더 안에 문서 생성
       const fileMetadata = {
         name: title,
         mimeType: 'application/vnd.google-apps.document',
-        parents: [SHARED_FOLDER_ID]
+        parents: [targetFolder]
       };
       
       const file = await drive.files.create({
@@ -75,7 +78,6 @@ app.get("/sse", async (req, res) => {
       
       const documentId = file.data.id;
 
-      // 2. 생성된 문서에 내용 삽입
       await docs.documents.batchUpdate({
         documentId: documentId,
         requestBody: {
@@ -93,7 +95,7 @@ app.get("/sse", async (req, res) => {
       return {
         content: [{
           type: "text",
-          text: `✅ 공용 폴더에 저장이 완료되었습니다!\n문서 제목: ${title}\n링크: https://docs.google.com/document/d/${documentId}/edit`
+          text: `✅ 지정하신 폴더(${targetFolder})에 저장이 완료되었습니다!\n문서 제목: ${title}\n링크: https://docs.google.com/document/d/${documentId}/edit`
         }]
       };
     } catch (error) {
@@ -101,7 +103,7 @@ app.get("/sse", async (req, res) => {
       return {
         content: [{ 
           type: "text", 
-          text: `❌ 저장 실패: ${error.message}\n(도움말: 공유 폴더 권한 및 API 활성화를 확인해 주세요.)` 
+          text: `❌ 저장 실패: ${error.message}\n(도움말: 폴더 ID가 정확한지, 그리고 서비스 계정이 해당 폴더에 '편집자'로 초대되었는지 확인해 주세요.)` 
         }],
         isError: true
       };
