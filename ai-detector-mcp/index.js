@@ -6,19 +6,20 @@ let pipeline;
 let classifier;
 
 // Transformers.js 초기화 (서버 시작 시 모델 로드)
+// Transformers.js 초기화
 async function initModel() {
   console.log("로컬 AI 모델(RoBERTa) 로드 중...");
   try {
     const { pipeline: hfPipeline, env } = await import("@xenova/transformers");
     
-    // 허깅페이스 허브 접속 설정 최적화
-    env.allowLocalModels = false;
-    env.useBrowserCache = false;
+    // 로컬 전용 모드 강제 활성화
+    env.allowRemoteModels = false; // 외부 접속 차단
+    env.localModelPath = "/app/.cache"; // 로컬 경로 지정
     
     pipeline = hfPipeline;
-    // 더 안정적인 모델 ID로 변경
+    // 빌드 시점에 받아온 모델을 로드합니다.
     classifier = await pipeline("text-classification", "Xenova/roberta-base-openai-detector");
-    console.log("모델 로드 완료! (ONNX 가속 활성화됨)");
+    console.log("모델 로드 완료! (오프라인 모드)");
   } catch (error) {
     console.error("모델 로딩 중 에러 발생:", error);
   }
@@ -129,16 +130,17 @@ let transport;
 app.get("/sse", async (req, res) => {
   console.log("새로운 SSE 연결 시도...");
   
-  // 기존 연결이 있다면 종료 (Single Client 보장)
+  // 매 연결마다 새로운 전송 객체 생성
+  const transport = new SSEServerTransport("/messages", res);
+  
+  // 이미 연결된 경우를 대비해 프로토콜 수준에서 연결 시도
   try {
-    if (server.transport) {
-      await server.close();
-    }
-  } catch (e) {}
-
-  transport = new SSEServerTransport("/messages", res);
-  await server.connect(transport);
-  console.log("SSE 연결 성공");
+    await server.connect(transport);
+    console.log("SSE 연결 성공");
+  } catch (error) {
+    console.error("연결 중 에러:", error.message);
+    // 이미 연결된 경우라면 기존 연결을 활용하거나 에러 무시
+  }
 });
 
 app.post("/messages", async (req, res) => {
