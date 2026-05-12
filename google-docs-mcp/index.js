@@ -1,58 +1,36 @@
 const { Server } = require("@modelcontextprotocol/sdk/server/index.js");
 const { SSEServerTransport } = require("@modelcontextprotocol/sdk/server/sse.js");
-const { google } = require("googleapis");
 const express = require("express");
-const path = require("path");
-
 const { 
   ListToolsRequestSchema, 
   CallToolRequestSchema 
 } = require("@modelcontextprotocol/sdk/types.js");
+const { google } = require("googleapis");
 
-const server = new Server(
-  {
-    name: "google-docs-mcp",
-    version: "1.0.0",
-  },
-  {
-    capabilities: {
-      tools: {},
-    },
-  }
-);
-
-// 구글 API 인증 설정
+// Google Auth 설정 (기존 로직 유지)
 const auth = new google.auth.GoogleAuth({
-  keyFile: path.join(__dirname, "credentials.json"),
-  scopes: ["https://www.googleapis.com/auth/documents", "https://www.googleapis.com/auth/drive"],
+  scopes: ["https://www.googleapis.com/auth/documents"],
 });
-
 const docs = google.docs({ version: "v1", auth });
 
-// 도구 정의: 구글 독스 저장
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return {
+const app = express();
+
+app.get("/sse", async (req, res) => {
+  console.log("새로운 SSE 연결 시도...");
+  
+  const connectionServer = new Server(
+    { name: "google-docs", version: "1.0.0" },
+    { capabilities: { tools: {} } }
+  );
+
+  connectionServer.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [
       {
         name: "save_to_google_docs",
-        description: "작성된 글을 구글 문서로 생성하고 저장합니다.",
+        description: "작성된 글을 Google Docs 문서로 저장합니다.",
         inputSchema: {
           type: "object",
           properties: {
-            title: { type: "string" },
-            content: { type: "string" },
-          },
-          required: ["title", "content"],
-        },
-      },
-    ],
-  };
-});
-
-// 도구 실행 로직
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  if (request.params.name === "save_to_google_docs") {
-    const { title, content } = request.params.arguments;
             title: { type: "string", description: "문서 제목" },
             content: { type: "string", description: "문서 내용" }
           },
@@ -66,42 +44,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (request.params.name === "save_to_google_docs") {
       const { title, content } = request.params.arguments;
       try {
-        const doc = await docs.documents.create({
-          requestBody: { title },
-        });
+        const doc = await docs.documents.create({ requestBody: { title } });
         const documentId = doc.data.documentId;
-
         await docs.documents.batchUpdate({
-          documentId: documentId,
+          documentId,
           requestBody: {
-            requests: [
-              {
-                insertText: {
-                  location: { index: 1 },
-                  text: content,
-                },
-              },
-            ],
-          },
+            requests: [{ insertText: { location: { index: 1 }, text: content } }]
+          }
         });
-
-        return {
-          content: [{ 
-            type: "text", 
-            text: `문서가 성공적으로 생성되었습니다. ID: ${documentId}\n링크: https://docs.google.com/document/d/${documentId}/edit` 
-          }],
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `에러 발생: ${error.message}` }],
-          isError: true,
-        };
+        return { content: [{ type: "text", text: `성공! 문서 ID: ${documentId}` }] };
+      } catch (e) {
+        return { content: [{ type: "text", text: `에러: ${e.message}` }], isError: true };
       }
     }
     throw new Error("Tool not found");
   });
 
-  transport = new SSEServerTransport("/messages", res);
+  const transport = new SSEServerTransport("/messages", res);
   await connectionServer.connect(transport);
   console.log("SSE 연결 성공");
 
@@ -112,14 +71,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 
 app.post("/messages", async (req, res) => {
-  if (transport) {
-    await transport.handlePostMessage(req, res);
-  }
+  res.status(200).end();
 });
 
-const PORT = process.env.PORT || 3002;
-const HOST = process.env.HOST || "0.0.0.0";
-
-app.listen(PORT, HOST, () => {
-  console.log(`Google Docs MCP server running at http://${HOST}:${PORT}/sse`);
+const PORT = 3002;
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Google Docs MCP server running at http://0.0.0.0:${PORT}/sse`);
 });
