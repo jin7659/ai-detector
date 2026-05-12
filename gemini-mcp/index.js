@@ -56,13 +56,22 @@ let transport;
 
 app.get("/sse", async (req, res) => {
   console.log("새로운 SSE 연결 시도...");
-  try {
-    if (server.transport) await server.close();
-  } catch (e) {}
-  
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
   const transport = new SSEServerTransport("/messages", res);
-  await server.connect(transport);
-  console.log("SSE 연결 성공");
+  try {
+    await server.connect(transport);
+    console.log("SSE 연결 성공");
+    req.on('close', () => {
+      console.log("SSE 연결 종료");
+      server.close();
+    });
+  } catch (error) {
+    console.error("연결 중 에러:", error.message);
+  }
 });
 
 app.post("/messages", async (req, res) => {

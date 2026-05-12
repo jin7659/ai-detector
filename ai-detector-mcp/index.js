@@ -131,16 +131,25 @@ let transport;
 app.get("/sse", async (req, res) => {
   console.log("새로운 SSE 연결 시도...");
   
-  // 매 연결마다 새로운 전송 객체 생성
+  // SSE 연결 유지 설정
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
   const transport = new SSEServerTransport("/messages", res);
   
-  // 이미 연결된 경우를 대비해 프로토콜 수준에서 연결 시도
   try {
     await server.connect(transport);
     console.log("SSE 연결 성공");
+    
+    // 연결 종료 시 처리
+    req.on('close', () => {
+      console.log("SSE 연결 종료");
+      server.close();
+    });
   } catch (error) {
     console.error("연결 중 에러:", error.message);
-    // 이미 연결된 경우라면 기존 연결을 활용하거나 에러 무시
   }
 });
 
