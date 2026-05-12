@@ -7,17 +7,21 @@ let classifier;
 
 // Transformers.js 초기화 (서버 시작 시 모델 로드)
 async function initModel() {
-  console.log("로컬 AI 모델(ONNX 최적화 버전) 로드 중...");
-  const { pipeline: hfPipeline, env } = await import("@xenova/transformers");
-  
-  // ONNX Runtime 설정 최적화
-  env.allowLocalModels = false;
-  env.useBrowserCache = false;
-  
-  pipeline = hfPipeline;
-  // Xenova 모델은 이미 ONNX로 변환 및 양자화되어 있어 오라클 CPU 환경에서 최적의 성능을 냅니다.
-  classifier = await pipeline("text-classification", "Xenova/chatgpt-detector-roberta");
-  console.log("모델 로드 완료! (ONNX 가속 활성화됨)");
+  console.log("로컬 AI 모델(RoBERTa) 로드 중...");
+  try {
+    const { pipeline: hfPipeline, env } = await import("@xenova/transformers");
+    
+    // 허깅페이스 허브 접속 설정 최적화
+    env.allowLocalModels = false;
+    env.useBrowserCache = false;
+    
+    pipeline = hfPipeline;
+    // 더 안정적인 모델 ID로 변경
+    classifier = await pipeline("text-classification", "Xenova/roberta-base-openai-detector");
+    console.log("모델 로드 완료! (ONNX 가속 활성화됨)");
+  } catch (error) {
+    console.error("모델 로딩 중 에러 발생:", error);
+  }
 }
 
 /**
