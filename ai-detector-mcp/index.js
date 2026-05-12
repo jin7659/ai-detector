@@ -127,8 +127,18 @@ const app = express();
 let transport;
 
 app.get("/sse", async (req, res) => {
+  console.log("새로운 SSE 연결 시도...");
+  
+  // 기존 연결이 있다면 종료 (Single Client 보장)
+  try {
+    if (server.transport) {
+      await server.close();
+    }
+  } catch (e) {}
+
   transport = new SSEServerTransport("/messages", res);
   await server.connect(transport);
+  console.log("SSE 연결 성공");
 });
 
 app.post("/messages", async (req, res) => {

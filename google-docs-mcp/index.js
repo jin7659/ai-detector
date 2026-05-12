@@ -96,8 +96,14 @@ const app = express();
 let transport;
 
 app.get("/sse", async (req, res) => {
-  transport = new SSEServerTransport("/messages", res);
+  console.log("새로운 SSE 연결 시도...");
+  try {
+    if (server.transport) await server.close();
+  } catch (e) {}
+  
+  const transport = new SSEServerTransport("/messages", res);
   await server.connect(transport);
+  console.log("SSE 연결 성공");
 });
 
 app.post("/messages", async (req, res) => {
