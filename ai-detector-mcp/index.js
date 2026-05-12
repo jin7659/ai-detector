@@ -52,105 +52,63 @@ const server = new Server(
   },
   {
     capabilities: {
-      tools: {},
-    },
-  }
-);
-
-// 도구 정의
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return {
-    tools: [
-      {
-        name: "check_ai_probability",
-        description: "텍스트의 AI 생성 확률을 체크합니다. (긴 문서 자동 분할 및 ONNX 가속 적용)",
-        inputSchema: {
-          type: "object",
-          properties: {
-            text: { type: "string" },
-          },
-          required: ["text"],
-        },
-      },
-    ],
-  };
-});
-
-// 도구 실행 로직
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  if (request.params.name === "check_ai_probability") {
-    const { text } = request.params.arguments;
-    
-    if (!classifier) {
-      return {
-        content: [{ type: "text", text: "모델이 아직 로드되지 않았습니다." }],
-        isError: true
-      };
-    }
-
-    try {
-      // 성능 최적화: 텍스트가 길 경우 청크로 나누어 처리
-      const chunks = chunkText(text);
-      let totalProbability = 0;
-
-      console.log(`총 ${chunks.length}개의 청크로 분할하여 검사를 시작합니다...`);
-
-      for (const chunk of chunks) {
-        const results = await classifier(chunk);
-        const aiResult = results.find(r => r.label === 'ChatGPT' || r.label === 'LABEL_1');
-        totalProbability += aiResult.score;
-      }
-
-      // 모든 청크의 평균 확률 계산
-      const averageProbability = Math.floor((totalProbability / chunks.length) * 100);
-
-      return {
-        content: [{ 
-          type: "text", 
-          text: JSON.stringify({ 
-            probability: averageProbability, 
-            chunks_processed: chunks.length,
-            status: "success",
-            message: `ONNX 가속 및 청크 분할 검사 완료: ${averageProbability}%` 
-          }) 
-        }],
-      };
-    } catch (error) {
-      return {
-        content: [{ type: "text", text: `추론 에러: ${error.message}` }],
-        isError: true
-      };
-    }
-  }
-  throw new Error("Tool not found");
-});
-
 const app = express();
 let transport;
 
 app.get("/sse", async (req, res) => {
   console.log("새로운 SSE 연결 시도...");
   
-  // SSE 연결 유지 설정
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders();
+  // 매 연결마다 새로운 서버 인스턴스 생성 (충돌 방지 정석)
+  const connectionServer = new Server(
+    { name: "ai-detector", version: "1.0.0" },
+    { capabilities: { tools: {} } }
+  );
+
+  // 도구 핸들러 등록 (매번 등록)
+  connectionServer.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: [
+      {
+        name: "check_ai_probability",
+        description: "텍스트가 AI에 의해 작성되었을 확률을 분석합니다. (512 토큰 제한 자동 처리)",
+        inputSchema: {
+          type: "object",
+          properties: {
+            text: { type: "string", description: "분석할 본문 텍스트" }
+          },
+          required: ["text"]
+        }
+      }
+    ]
+  }));
+
+  connectionServer.setRequestHandler(CallToolRequestSchema, async (request) => {
+    if (request.params.name === "check_ai_probability") {
+      const text = request.params.arguments.text;
+      if (!classifier) return { content: [{ type: "text", text: "모델이 아직 준비되지 않았습니다." }], isError: true };
+      
+      const chunks = chunkText(text);
+      let totalScore = 0;
+      for (const chunk of chunks) {
+        const result = await classifier(chunk);
+        if (result && result[0]) {
+          const aiScore = result[0].label === 'LABEL_1' ? result[0].score : (1 - result[0].score);
+          totalScore += aiScore;
+        }
+      }
+      const finalScore = (totalScore / chunks.length * 100).toFixed(2);
+      return { content: [{ type: "text", text: `분석 결과, 이 텍스트가 AI에 의해 작성되었을 확률은 약 ${finalScore}% 입니다.` }] };
+    }
+    throw new Error("Tool not found");
+  });
 
   const transport = new SSEServerTransport("/messages", res);
-  
-  try {
-    await server.connect(transport);
-    console.log("SSE 연결 성공");
-    
-    // 연결 종료 시 처리
-    req.on('close', () => {
-      console.log("SSE 연결 종료");
-      server.close();
-    });
-  } catch (error) {
-    console.error("연결 중 에러:", error.message);
-  }
+  await connectionServer.connect(transport);
+  console.log("SSE 연결 성공");
+
+  req.on('close', () => {
+    console.log("SSE 연결 종료");
+    connectionServer.close();
+  });
 });
 
 app.post("/messages", async (req, res) => {

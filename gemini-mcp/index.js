@@ -7,71 +7,51 @@ const {
   CallToolRequestSchema 
 } = require("@modelcontextprotocol/sdk/types.js");
 
-const server = new Server(
-  {
-    name: "gemini-mcp",
-    version: "1.0.0",
-  },
-  {
-    capabilities: {
-      tools: {},
-    },
-  }
-);
-
-// 도구 정의 예시: 글쓰기
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return {
-    tools: [
-      {
-        name: "write_article",
-        description: "주어진 레퍼런스를 바탕으로 글을 작성합니다.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            reference: { type: "string" },
-            guidelines: { type: "string" },
-          },
-          required: ["reference", "guidelines"],
-        },
-      },
-    ],
-  };
-});
-
-// 도구 실행 로직
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  if (request.params.name === "write_article") {
-    // 여기서 실제 Gemini API 호출 로직이 들어갑니다.
-    const { reference, guidelines } = request.params.arguments;
-    return {
-      content: [{ type: "text", text: `[초안] 레퍼런스: ${reference}\n가이드라인: ${guidelines}를 바탕으로 작성된 글입니다...` }],
-    };
-  }
-  throw new Error("Tool not found");
-});
-
 const app = express();
 let transport;
 
 app.get("/sse", async (req, res) => {
   console.log("새로운 SSE 연결 시도...");
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders();
+  
+  const connectionServer = new Server(
+    { name: "gemini-mcp", version: "1.0.0" },
+    { capabilities: { tools: {} } }
+  );
+
+  connectionServer.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: [
+      {
+        name: "write_gemini_article",
+        description: "Gemini를 사용하여 고품질 글을 작성합니다.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            topic: { type: "string", description: "글의 주제" },
+            style: { type: "string", description: "글의 스타일 (예: 블로그, 뉴스, 수필)" }
+          },
+          required: ["topic", "style"]
+        }
+      }
+    ]
+  }));
+
+  connectionServer.setRequestHandler(CallToolRequestSchema, async (request) => {
+    if (request.params.name === "write_gemini_article") {
+      const { topic, style } = request.params.arguments;
+      // 글쓰기 로직...
+      return { content: [{ type: "text", text: `${topic}에 대한 ${style} 스타일의 글을 작성했습니다.` }] };
+    }
+    throw new Error("Tool not found");
+  });
 
   const transport = new SSEServerTransport("/messages", res);
-  try {
-    await server.connect(transport);
-    console.log("SSE 연결 성공");
-    req.on('close', () => {
-      console.log("SSE 연결 종료");
-      server.close();
-    });
-  } catch (error) {
-    console.error("연결 중 에러:", error.message);
-  }
+  await connectionServer.connect(transport);
+  console.log("SSE 연결 성공");
+
+  req.on('close', () => {
+    console.log("SSE 연결 종료");
+    connectionServer.close();
+  });
 });
 
 app.post("/messages", async (req, res) => {

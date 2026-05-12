@@ -53,66 +53,62 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (request.params.name === "save_to_google_docs") {
     const { title, content } = request.params.arguments;
-    
-    try {
-      // 1. 새 문서 생성
-      const doc = await docs.documents.create({
-        requestBody: { title },
-      });
-      const documentId = doc.data.documentId;
+            title: { type: "string", description: "문서 제목" },
+            content: { type: "string", description: "문서 내용" }
+          },
+          required: ["title", "content"]
+        }
+      }
+    ]
+  }));
 
-      // 2. 내용 삽입
-      await docs.documents.batchUpdate({
-        documentId: documentId,
-        requestBody: {
-          requests: [
-            {
-              insertText: {
-                location: { index: 1 },
-                text: content,
+  connectionServer.setRequestHandler(CallToolRequestSchema, async (request) => {
+    if (request.params.name === "save_to_google_docs") {
+      const { title, content } = request.params.arguments;
+      try {
+        const doc = await docs.documents.create({
+          requestBody: { title },
+        });
+        const documentId = doc.data.documentId;
+
+        await docs.documents.batchUpdate({
+          documentId: documentId,
+          requestBody: {
+            requests: [
+              {
+                insertText: {
+                  location: { index: 1 },
+                  text: content,
+                },
               },
-            },
-          ],
-        },
-      });
+            ],
+          },
+        });
 
-      return {
-        content: [{ 
-          type: "text", 
-          text: `문서가 성공적으로 생성되었습니다. ID: ${documentId}\n링크: https://docs.google.com/document/d/${documentId}/edit` 
-        }],
-      };
-    } catch (error) {
-      return {
-        content: [{ type: "text", text: `에러 발생: ${error.message}` }],
-        isError: true,
-      };
+        return {
+          content: [{ 
+            type: "text", 
+            text: `문서가 성공적으로 생성되었습니다. ID: ${documentId}\n링크: https://docs.google.com/document/d/${documentId}/edit` 
+          }],
+        };
+      } catch (error) {
+        return {
+          content: [{ type: "text", text: `에러 발생: ${error.message}` }],
+          isError: true,
+        };
+      }
     }
-  }
-  throw new Error("Tool not found");
-});
+    throw new Error("Tool not found");
+  });
 
-const app = express();
-let transport;
+  transport = new SSEServerTransport("/messages", res);
+  await connectionServer.connect(transport);
+  console.log("SSE 연결 성공");
 
-app.get("/sse", async (req, res) => {
-  console.log("새로운 SSE 연결 시도...");
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders();
-
-  const transport = new SSEServerTransport("/messages", res);
-  try {
-    await server.connect(transport);
-    console.log("SSE 연결 성공");
-    req.on('close', () => {
-      console.log("SSE 연결 종료");
-      server.close();
-    });
-  } catch (error) {
-    console.error("연결 중 에러:", error.message);
-  }
+  req.on('close', () => {
+    console.log("SSE 연결 종료");
+    connectionServer.close();
+  });
 });
 
 app.post("/messages", async (req, res) => {
