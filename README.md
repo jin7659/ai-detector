@@ -76,7 +76,31 @@ chmod +x deploy.sh
    sudo ufw reload
    ```
 
-## 6. 기술 업데이트 및 최적화 내역 (Changelog)
+## 7. 로컬 클라이언트 연동 (Gemini CLI / Desktop App)
+
+로컬 컴퓨터에서 제미나이가 오라클 서버의 도구를 사용하도록 설정하는 방법입니다.
+
+### 1단계: 설정 파일 수정
+로컬 PC의 `~/.gemini/settings.json` 파일을 열고 아래 내용을 추가합니다.
+
+```json
+{
+  "mcpServers": {
+    "ai-detector": {
+      "url": "http://158.179.20.33:3001/sse"
+    },
+    "google-docs": {
+      "url": "http://158.179.20.33:3002/sse"
+    }
+  }
+}
+```
+
+### 2단계: 연동 확인
+설정 저장 후 `gemini-cli` 또는 제미나이 앱을 재시작하면, `check_ai_probability`와 `save_to_google_docs` 도구가 자동으로 활성화됩니다.
+
+---
+## 8. 기술 업데이트 및 최적화 내역 (Changelog)
 
 이 프로젝트는 개발 과정에서 다음과 같은 기술적 문제들을 해결하고 최적화되었습니다.
 
