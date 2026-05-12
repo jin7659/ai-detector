@@ -19,92 +19,79 @@ const auth = new google.auth.GoogleAuth({
 const docs = google.docs({ version: "v1", auth });
 const drive = google.drive({ version: "v3", auth });
 
-// 기본 폴더 (지정되지 않았을 때의 대비책)
-const DEFAULT_FOLDER_ID = "17X92aNaiBR1dDaf-6KAPoMDtSOvhFDrH";
-
 const app = express();
 const transports = new Map();
 
 app.get("/sse", async (req, res) => {
-  console.log("Google Docs MCP 개인별 폴더 저장 지원 모드");
+  console.log("Google Docs MCP 이메일 기반 자동 공유 모드 가동");
 
   const server = new Server(
-    { name: "google-docs-mcp", version: "1.4.0" },
+    { name: "google-docs-mcp", version: "1.5.0" },
     { capabilities: { tools: {} } }
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [
       {
-        name: "save_to_google_docs",
-        description: "지정된 폴더에 새로운 문서를 생성하고 저장합니다.",
+        name: "save_and_share_docs",
+        description: "문서를 생성하고 지정된 이메일 주소로 자동 공유합니다.",
         inputSchema: {
           type: "object",
           properties: {
             title: { type: "string", description: "문서 제목" },
             content: { type: "string", description: "문서 본문 내용" },
-            folderId: { 
-              type: "string", 
-              description: "저장할 구글 드라이브 폴더의 ID (각 사용자의 개인 폴더 ID)" 
-            }
+            email: { type: "string", description: "공유받을 사용자의 구글 이메일 주소" }
           },
-          required: ["title", "content"]
+          required: ["title", "content", "email"]
         }
       }
     ]
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    if (request.params.name !== "save_to_google_docs") {
+    if (request.params.name !== "save_and_share_docs") {
       throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${request.params.name}`);
     }
 
-    const { title, content, folderId } = request.params.arguments;
-    const targetFolder = folderId || DEFAULT_FOLDER_ID;
+    const { title, content, email } = request.params.arguments;
 
     try {
-      console.log(`[맞춤형 저장] 문서 생성 시작: ${title} -> 폴더: ${targetFolder}`);
+      console.log(`[이메일 공유 저장] 문서 생성 시작: ${title} -> 대상: ${email}`);
       
-      const fileMetadata = {
-        name: title,
-        mimeType: 'application/vnd.google-apps.document',
-        parents: [targetFolder]
-      };
-      
-      const file = await drive.files.create({
-        requestBody: fileMetadata,
-        fields: 'id',
+      // 1. 문서 생성
+      const doc = await docs.documents.create({
+        requestBody: { title },
       });
-      
-      const documentId = file.data.id;
+      const documentId = doc.data.documentId;
 
+      // 2. 내용 삽입
       await docs.documents.batchUpdate({
         documentId: documentId,
         requestBody: {
-          requests: [
-            {
-              insertText: {
-                location: { index: 1 },
-                text: content,
-              },
-            },
-          ],
+          requests: [{ insertText: { location: { index: 1 }, text: content } }],
         },
+      });
+
+      // 3. 이메일로 자동 공유 (편집자 권한 부여)
+      await drive.permissions.create({
+        fileId: documentId,
+        requestBody: {
+          type: 'user',
+          role: 'writer',
+          emailAddress: email
+        }
       });
 
       return {
         content: [{
           type: "text",
-          text: `✅ 지정하신 폴더(${targetFolder})에 저장이 완료되었습니다!\n문서 제목: ${title}\n링크: https://docs.google.com/document/d/${documentId}/edit`
+          text: `✅ 성공! 문서를 생성하고 ${email} 님에게 공유했습니다.\n구글 드라이브의 '공유 문서함'에서 확인해 보세요.\n링크: https://docs.google.com/document/d/${documentId}/edit`
         }]
       };
     } catch (error) {
-      console.error("저장 에러:", error.message);
+      console.error("공유 저장 에러:", error.message);
       return {
-        content: [{ 
-          type: "text", 
-          text: `❌ 저장 실패: ${error.message}\n(도움말: 폴더 ID가 정확한지, 그리고 서비스 계정이 해당 폴더에 '편집자'로 초대되었는지 확인해 주세요.)` 
-        }],
+        content: [{ type: "text", text: `❌ 실패: ${error.message}` }],
         isError: true
       };
     }
