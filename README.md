@@ -110,12 +110,18 @@ docker compose ps
 ```
 모든 서비스의 STATUS가 `Up` 또는 `running`이어야 합니다.
 
-### 2) 실시간 로그 모니터링 (가장 확실한 방법)
-AI 모델이 정상적으로 로드되었는지 확인하려면 다음 명령어를 사용하세요.
+### 2) 실시간 로그 모니터링 (서비스 상태 점검)
+
+**전체 서비스 로그 한꺼번에 보기:**
 ```bash
-docker compose logs -f ai-detector-mcp
+docker compose logs -f
 ```
-로그에 **`모델 로드 완료! (오프라인 모드)`**라는 메시지가 보이면 성공입니다.
+위 명령어를 실행하면 모든 서비스의 로그가 섞여서 나오며, 각 서비스가 포트를 정상적으로 열었는지(`listening on port...`) 확인할 수 있습니다.
+
+**특정 서비스만 골라서 보기:**
+- **AI 디텍터**: `docker compose logs -f ai-detector-mcp` (모델 로드 완료 여부 확인 필수)
+- **제미나이 서버**: `docker compose logs -f gemini-mcp`
+- **구글 문서 서버**: `docker compose logs -f google-docs-mcp`
 
 ### 3) 서버 응답 테스트
 로컬 터미널에서 서버 포트가 열려 있는지 확인합니다.
