@@ -17,7 +17,7 @@ jobs:
 
     strategy:
       matrix:
-        service: [gemini-mcp, ai-detector-mcp, google-docs-mcp, workflow-orchestrator]
+        service: [gemini-mcp, ai-detector-mcp, workflow-orchestrator]
 
     steps:
       - name: Checkout repository
