@@ -1,145 +1,104 @@
 const { Server } = require("@modelcontextprotocol/sdk/server/index.js");
-const { SSEServerTransport } = require("@modelcontextprotocol/sdk/server/sse.js");
-const { 
-  ListToolsRequestSchema, 
-  CallToolRequestSchema,
-  ErrorCode,
-  McpError
-} = require("@modelcontextprotocol/sdk/types.js");
-const express = require("express");
+const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio.js");
+const { ListToolsRequestSchema, CallToolRequestSchema, ErrorCode, McpError } = require("@modelcontextprotocol/sdk/types.js");
 const { google } = require("googleapis");
+const fs = require("fs");
+const path = require("path");
+const readline = require("readline");
 
-// --- Google API 초기화 ---
-// 서비스 계정 키를 명시적으로 로드하여 환경 변수 혼선을 방지합니다.
-const auth = new google.auth.GoogleAuth({
-  scopes: [
-    "https://www.googleapis.com/auth/documents",
-    "https://www.googleapis.com/auth/drive.file",
-    "https://www.googleapis.com/auth/drive"
-  ],
-});
+// --- 설정 파일 경로 ---
+const TOKEN_PATH = path.join(__dirname, "token.json");
+const CREDENTIALS_PATH = path.join(__dirname, "credentials.json");
 
-const docs = google.docs({ version: "v1", auth });
-const drive = google.drive({ version: "v3", auth });
+// 5TB 전용 폴더 ID
+const MY_5TB_FOLDER_ID = "17X92aNaiBR1dDaf-6KAPoMDtSOvhFDrH";
 
-// 전공자님의 공용 폴더 ID (docs-bot)
-const TEAM_FOLDER_ID = "17X92aNaiBR1dDaf-6KAPoMDtSOvhFDrH";
+// --- 구글 인증 클라이언트 설정 ---
+async function getAuthClient() {
+  let credentials;
+  try {
+    credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH));
+  } catch (err) {
+    throw new Error("credentials.json 파일이 없습니다. Google Cloud Console에서 Desktop App용 키를 다운받아주세요.");
+  }
 
-const app = express();
-const transports = new Map();
+  const { client_secret, client_id, redirect_uris } = credentials.installed || credentials.web;
+  const oAuth2Client = new google.auth.OAuth2(client_id, client_secret, redirect_uris[0]);
 
-app.get("/sse", async (req, res) => {
-  console.log("Google Docs MCP [기존 방식 - 정밀 보정] 연결 요청");
+  // 기존 토큰이 있는지 확인
+  if (fs.existsSync(TOKEN_PATH)) {
+    const token = fs.readFileSync(TOKEN_PATH);
+    oAuth2Client.setCredentials(JSON.parse(token));
+    return oAuth2Client;
+  }
 
-  const server = new Server(
-    { name: "google-docs-mcp", version: "1.9.0" },
-    { capabilities: { tools: {} } }
-  );
+  // 토큰이 없으면 로그인 프로세스 진행 (최초 1회)
+  return new Promise((resolve, reject) => {
+    const authUrl = oAuth2Client.generateAuthUrl({
+      access_type: "offline",
+      scope: ["https://www.googleapis.com/auth/documents", "https://www.googleapis.com/auth/drive.file"],
+    });
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [
-      {
-        name: "save_to_google_docs",
-        description: "구글 문서로 저장합니다. 지정된 폴더 ID가 없으면 기본 팀 폴더에 저장됩니다.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            title: { type: "string", description: "문서 제목" },
-            content: { type: "string", description: "문서 본문 내용" },
-            folderId: { type: "string", description: "저장할 폴더 ID (생략 가능)" }
-          },
-          required: ["title", "content"]
-        }
-      }
-    ]
-  }));
-
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    if (request.params.name !== "save_to_google_docs") {
-      throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${request.params.name}`);
-    }
-
-    const { title, content, folderId } = request.params.arguments;
-    const targetFolder = folderId || TEAM_FOLDER_ID;
-
-    try {
-      console.log(`[시도] 문서 생성: ${title} -> 폴더: ${targetFolder}`);
-      
-      // 1. 드라이브 API를 통해 문서를 생성 (parents 옵션 사용)
-      // 이 방식이 서비스 계정 권한 에러가 가장 적습니다.
-      const createResponse = await drive.files.create({
-        requestBody: {
-          name: title,
-          mimeType: 'application/vnd.google-apps.document',
-          parents: [targetFolder]
-        },
-        fields: 'id',
+    console.log("이 주소로 들어가서 로그인을 완료해 주세요:", authUrl);
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question("브라우저에 표시된 코드를 여기에 입력하세요: ", (code) => {
+      rl.close();
+      oAuth2Client.getToken(code, (err, token) => {
+        if (err) return reject("인증 코드 오류: " + err);
+        oAuth2Client.setCredentials(token);
+        fs.writeFileSync(TOKEN_PATH, JSON.stringify(token));
+        console.log("인증 성공! token.json이 저장되었습니다.");
+        resolve(oAuth2Client);
       });
-      
-      const documentId = createResponse.data.id;
-      console.log(`[성공] 문서 생성 완료 (ID: ${documentId})`);
-
-      // 2. 문서 본문 내용 업데이트
-      await docs.documents.batchUpdate({
-        documentId: documentId,
-        requestBody: {
-          requests: [
-            {
-              insertText: {
-                location: { index: 1 },
-                text: content,
-              },
-            },
-          ],
-        },
-      });
-
-      return {
-        content: [{
-          type: "text",
-          text: `✅ 구글 문서 저장 성공!\n제목: ${title}\n폴더: ${targetFolder}\n링크: https://docs.google.com/document/d/${documentId}/edit`
-        }]
-      };
-    } catch (error) {
-      console.error("저장 중 에러 발생:", JSON.stringify(error, null, 2));
-      
-      let errorMsg = error.message;
-      if (errorMsg.includes("does not have permission")) {
-        errorMsg = "구글이 접근을 거부했습니다. [체크리스트: 1.Google Drive API 활성화 여부, 2.서비스 계정이 폴더에 '편집자'로 초대되었는지 확인]";
-      }
-      
-      return {
-        content: [{ type: "text", text: `❌ 에러 발생: ${errorMsg}` }],
-        isError: true
-      };
-    }
+    });
   });
+}
 
-  const transport = new SSEServerTransport("/messages", res);
-  const sessionId = transport.sessionId;
-  transports.set(sessionId, transport);
+// --- MCP 서버 로직 ---
+const server = new Server({ name: "macbook-google-docs", version: "3.0.0" }, { capabilities: { tools: {} } });
+
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: [{
+    name: "save_to_my_google_docs",
+    description: "내 개인 구글 드라이브(5TB)에 문서를 저장합니다.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        content: { type: "string" }
+      },
+      required: ["title", "content"]
+    }
+  }]
+}));
+
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const auth = await getAuthClient();
+  const docs = google.docs({ version: "v1", auth });
+  const drive = google.drive({ version: "v3", auth });
+
+  const { title, content } = request.params.arguments;
   
-  await server.connect(transport);
-  console.log(`Docs 서버 준비 완료 (ID: ${sessionId})`);
+  try {
+    const file = await drive.files.create({
+      requestBody: { name: title, mimeType: 'application/vnd.google-apps.document', parents: [MY_5TB_FOLDER_ID] },
+      fields: 'id',
+    });
+    
+    await docs.documents.batchUpdate({
+      documentId: file.data.id,
+      requestBody: { requests: [{ insertText: { location: { index: 1 }, text: content } }] },
+    });
 
-  req.on('close', () => {
-    console.log(`Docs 서버 연결 종료 (ID: ${sessionId})`);
-    transports.delete(sessionId);
-    server.close();
-  });
-});
-
-app.post("/messages", async (req, res) => {
-  const sessionId = req.query.sessionId;
-  const transport = transports.get(sessionId);
-  if (transport) {
-    await transport.handlePostMessage(req, res);
-  } else {
-    res.status(404).send("Session not found");
+    return { content: [{ type: "text", text: `✅ 저장 완료! 링크: https://docs.google.com/document/d/${file.data.id}/edit` }] };
+  } catch (err) {
+    return { content: [{ type: "text", text: `❌ 에러: ${err.message}` }], isError: true };
   }
 });
 
-const PORT = 3002;
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Google Docs MCP server listening at http://0.0.0.0:${PORT}/sse`);
-});
+async function main() {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+
+main();

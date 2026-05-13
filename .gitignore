@@ -21,3 +21,5 @@ Thumbs.db
 
 # Google API Credentials
 credentials.json
+token.json
+auth.js
