@@ -87,10 +87,10 @@ chmod +x deploy.sh
 {
   "mcpServers": {
     "ai-detector": {
-      "url": "http://158.179.20.33:3001/sse"
+      "url": "http://000.000.00.00:3001/sse"
     },
     "google-docs": {
-      "url": "http://158.179.20.33:3002/sse"
+      "url": "http://000.000.00.00:3002/sse"
     }
   }
 }
